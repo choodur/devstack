@@ -668,6 +668,13 @@ echo_summary "Installing OpenStack project source"
 # Install required infra support libraries
 install_infra
 
+# Phase: pre-install
+if [[ -d $TOP_DIR/extras.d ]]; then
+    for i in $TOP_DIR/extras.d/*.sh; do
+        [[ -r $i ]] && source $i stack pre-install
+    done
+fi
+
 # Install oslo libraries that have graduated
 install_oslo
 
