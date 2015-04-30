@@ -1,0 +1,82 @@
+#!/bin/bash
+#
+# lib/ceph_dedicated
+# Functions to control the configuration and operation of dedicated
+# pools per volume type backed by **Ceph**
+
+# Dependencies:
+#
+# - ``functions`` file
+# - ``CEPH_DATA_DIR`` or ``DATA_DIR`` must be defined
+
+# Save trace setting
+XTRACE=$(set +o | grep xtrace)
+set +o xtrace
+
+# Common
+CEPH_CONF_DIR=${CEPH_CONF_DIR:-/etc/ceph}
+CEPH_CONF_FILE=${CEPH_CONF_DIR}/ceph.conf
+CEPH_REPLICAS=${CEPH_REPLICAS:-1}
+
+# Cinder
+CINDER_CEPH_POOL=${CINDER_CEPH_POOL:-volumes}
+CINDER_CEPH_POOL_PG=${CINDER_CEPH_POOL_PG:-8}
+CINDER_CEPH_POOL_PGP=${CINDER_CEPH_POOL_PGP:-8}
+CINDER_CEPH_USER=${CINDER_CEPH_USER:-cinder}
+
+DEDICATED_TYPE='ceph_dedicated'
+
+# Functions
+# ------------
+
+function cleanup_ceph_dedicated_remote {
+    if is_service_enabled cinder && [[ -n "$CINDER_ENABLED_BACKENDS" ]]; then
+        for be in ${CINDER_ENABLED_BACKENDS//,/ }; do
+            BE_TYPE=${be%%:*}
+            POOL_NAME=${be##*:}
+            if [ $BE_TYPE = $DEDICATED_TYPE ]; then
+                sudo ceph osd pool delete $POOL_NAME $POOL_NAME --yes-i-really-really-mean-it > /dev/null 2>&1
+                sudo ceph auth del client.$CINDER_CEPH_USER > /dev/null 2>&1
+            fi
+        done
+    fi
+}
+
+function configure_ceph_dedicated_embedded_cinder {
+    if [[ -n "$CINDER_ENABLED_BACKENDS" ]]; then
+        for be in ${CINDER_ENABLED_BACKENDS//,/ }; do
+            BE_TYPE=${be%%:*}
+            POOL_NAME=${be##*:}
+            if [ $BE_TYPE = $DEDICATED_TYPE ]; then
+                sudo ceph -c ${CEPH_CONF_FILE} osd pool set ${POOL_NAME} size ${CEPH_REPLICAS}
+            fi
+        done
+    fi
+}
+
+# configure_ceph_dedicated_cinder() - Cinder config needs to come after Cinder is set up
+function configure_ceph_dedicated_cinder {
+    if [[ -n "$CINDER_ENABLED_BACKENDS" ]]; then
+        ALLOW_POOLS=""
+
+        for be in ${CINDER_ENABLED_BACKENDS//,/ }; do
+            BE_TYPE=${be%%:*}
+            POOL_NAME=${be##*:}
+            if [ $BE_TYPE = $DEDICATED_TYPE ]; then
+                sudo ceph -c ${CEPH_CONF_FILE} osd pool create ${POOL_NAME} ${CINDER_CEPH_POOL_PG} ${CINDER_CEPH_POOL_PGP}
+                ALLOW_POOLS+=", allow rwx pool=${POOL_NAME}"
+            fi
+        done
+
+        sudo ceph -c ${CEPH_CONF_FILE} auth del client.${CINDER_CEPH_USER} > /dev/null 2>&1
+        sudo ceph -c ${CEPH_CONF_FILE} auth get-or-create client.${CINDER_CEPH_USER} mon "allow r" osd "allow class-read object_prefix rbd_children, allow rwx pool=${CINDER_CEPH_POOL}, allow rwx pool=${NOVA_CEPH_POOL},allow rx pool=${GLANCE_CEPH_POOL}${ALLOW_POOLS}" | sudo tee ${CEPH_CONF_DIR}/ceph.client.${CINDER_CEPH_USER}.keyring
+        sudo chown ${STACK_USER}:$(id -g -n $whoami) ${CEPH_CONF_DIR}/ceph.client.${CINDER_CEPH_USER}.keyring
+    fi
+}
+
+# Restore xtrace
+$XTRACE
+
+## Local variables:
+## mode: shell-script
+## End:

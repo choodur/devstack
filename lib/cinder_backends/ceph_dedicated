@@ -1,0 +1,46 @@
+#!/bin/bash
+#
+# lib/cinder_backends/ceph_dedicated
+# Configure the ceph backend to have a dedicated pool per volume type
+
+# Enable with:
+#
+#   CINDER_ENABLED_BACKENDS+=,ceph_dedicated:ceph
+
+# Dependencies:
+#
+# - ``functions`` file
+# - ``cinder`` configurations
+
+# configure_ceph_backend_lvm - called from configure_cinder()
+
+
+# Save trace setting
+MY_XTRACE=$(set +o | grep xtrace)
+set +o xtrace
+
+# Entry Points
+# ------------
+
+# configure_cinder_backend_ceph_dedicated - Set config files, create data dirs, etc
+# configure_cinder_backend_ceph_dedicated $name
+function configure_cinder_backend_ceph_dedicated {
+    local be_name=$1
+
+    iniset $CINDER_CONF $be_name volume_backend_name $be_name
+    iniset $CINDER_CONF $be_name volume_driver "cinder.volume.drivers.rbd.RBDDriver"
+    iniset $CINDER_CONF $be_name rbd_ceph_conf "$CEPH_CONF"
+    iniset $CINDER_CONF $be_name rbd_pool $be_name
+    iniset $CINDER_CONF $be_name rbd_user "$CINDER_CEPH_USER"
+    iniset $CINDER_CONF $be_name rbd_uuid "$CINDER_CEPH_UUID"
+    iniset $CINDER_CONF $be_name rbd_flatten_volume_from_snapshot False
+    iniset $CINDER_CONF $be_name rbd_max_clone_depth 5
+    iniset $CINDER_CONF DEFAULT glance_api_version 2
+}
+
+# Restore xtrace
+$MY_XTRACE
+
+# Local variables:
+# mode: shell-script
+# End:
